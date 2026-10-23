@@ -1,0 +1,22 @@
+[project]
+name = "qa-lifecycle-lab"
+version = "0.1.0"
+description = "End-to-end test automation lab: system under test, framework, tests and CI/CD."
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+log_level = "INFO"
+markers = [
+    "smoke: fast checks that the service is up and core flows work",
+    "contract: response shape checks against the expected API contract",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "PT"]

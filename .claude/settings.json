@@ -1,0 +1,10 @@
+{
+  "enabledMcpjsonServers": ["testrail"],
+  "permissions": {
+    "deny": [
+      "mcp__testrail__deleteCase",
+      "mcp__testrail__deleteSection",
+      "Read(./.env)"
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "testrail": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@bun913/mcp-testrail@0.19.9"]
+    }
+  }
+}

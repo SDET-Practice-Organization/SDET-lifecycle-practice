@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
+
+  unit:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: pytest tests/unit --junitxml=reports/unit.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-reports
+          path: reports/
+
+  # Builds the real Docker image and tests it as a black box over HTTP.
+  api:
+    needs: unit
+    runs-on: ubuntu-latest
+    env:
+      API_BASE_URL: http://localhost:8000
+      API_KEY: ci-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+
+      - name: Build image
+        run: docker build -t taskapp:${{ github.sha }} .
+
+      - name: Start container
+        run: |
+          docker run -d --name taskapp -p 8000:8000 -e TASKAPP_API_KEY="$API_KEY" taskapp:${{ github.sha }}
+          for _ in $(seq 1 30); do
+            curl -fsS "$API_BASE_URL/health" && exit 0
+            sleep 1
+          done
+          docker logs taskapp
+          exit 1
+
+      - name: Smoke tests
+        run: pytest tests/api -m smoke --junitxml=reports/smoke.xml
+
+      - name: Full API suite
+        run: >
+          pytest tests/api -n 4
+          --junitxml=reports/api.xml
+          --html=reports/api.html --self-contained-html
+
+      - name: Container logs
+        if: failure()
+        run: docker logs taskapp
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-reports
+          path: reports/
+
+  # Tests the tests: the suite must FAIL against each deliberately broken build.
+  bug-detection:
+    needs: unit
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        bug:
+          - create_returns_200
+          - patch_ignores_status
+          - delete_not_persisted
+          - filter_ignored
+          - pagination_off_by_one
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Suite must detect ${{ matrix.bug }}
+        env:
+          TASKAPP_BUGS: ${{ matrix.bug }}
+        run: |
+          if pytest tests/api -q -p no:cacheprovider; then
+            echo "::error::Suite passed with bug '${{ matrix.bug }}' enabled: coverage gap"
+            exit 1
+          fi
+          echo "Bug '${{ matrix.bug }}' detected"
